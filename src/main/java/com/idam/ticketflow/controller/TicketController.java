@@ -27,10 +27,7 @@ public class TicketController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public TicketResponse create(
-            @Valid @RequestBody TicketCreateRequest request,
-            @AuthenticationPrincipal EmployeeUserDetails principal
-    ) {
+    public TicketResponse create(@Valid @RequestBody TicketCreateRequest request, @AuthenticationPrincipal EmployeeUserDetails principal) {
         return ticketService.create(request, principal.getEmployee());
     }
 

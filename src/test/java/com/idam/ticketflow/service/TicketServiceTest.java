@@ -64,19 +64,9 @@ class TicketServiceTest {
         verify(ticketAiService).analyze(request.title(), request.description());
     }
 
-    /**
-     * This test documents the CURRENT (buggy) behaviour described in
-     * TicketService#sortByUrgencyDescending's javadoc and BACKLOG.md item #4:
-     * the method is supposed to put the most urgent ticket first, but because
-     * it doesn't reverse the natural (ordinal) ordering, CRITICAL ends up
-     * last instead of first.
-     *
-     * Once you fix sortByUrgencyDescending, this test should start failing -
-     * that's your signal to update the assertions to the CORRECT expected
-     * order (CRITICAL, HIGH, MEDIUM, LOW) rather than leave this as-is.
-     */
+
     @Test
-    void sortByUrgencyDescending_currentlyReturnsLeastUrgentFirst_dueToKnownBug() {
+    void sortByUrgencyDescending_returnsMostUrgentFirst() {
         Ticket low = ticketWithPriority(TicketPriority.LOW);
         Ticket critical = ticketWithPriority(TicketPriority.CRITICAL);
         Ticket medium = ticketWithPriority(TicketPriority.MEDIUM);
@@ -84,7 +74,7 @@ class TicketServiceTest {
         List<Ticket> sorted = ticketService.sortByUrgencyDescending(List.of(low, critical, medium));
 
         assertThat(sorted).extracting(Ticket::getPriority)
-                .containsExactly(TicketPriority.LOW, TicketPriority.MEDIUM, TicketPriority.CRITICAL);
+                .containsExactly(TicketPriority.CRITICAL, TicketPriority.MEDIUM, TicketPriority.LOW);
     }
 
     private Ticket ticketWithPriority(TicketPriority priority) {

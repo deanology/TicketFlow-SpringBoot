@@ -3,9 +3,11 @@ package com.idam.ticketflow.service;
 import com.idam.ticketflow.domain.Department;
 import com.idam.ticketflow.dto.request.DepartmentCreateRequest;
 import com.idam.ticketflow.dto.response.DepartmentResponse;
+import com.idam.ticketflow.exception.BusinessRuleException;
 import com.idam.ticketflow.exception.DuplicateResourceException;
 import com.idam.ticketflow.exception.ResourceNotFoundException;
 import com.idam.ticketflow.repository.DepartmentRepository;
+import com.idam.ticketflow.repository.EmployeeRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,9 +17,11 @@ import java.util.List;
 public class DepartmentService {
 
     private final DepartmentRepository departmentRepository;
+    private final EmployeeRepository employeeRepository;
 
-    public DepartmentService(DepartmentRepository departmentRepository) {
+    public DepartmentService(DepartmentRepository departmentRepository, EmployeeRepository employeeRepository) {
         this.departmentRepository = departmentRepository;
+        this.employeeRepository = employeeRepository;
     }
 
     @Transactional
@@ -48,16 +52,18 @@ public class DepartmentService {
         return DepartmentResponse.fromEntity(getEntityById(id));
     }
 
-    /**
-     * KNOWN BUG (see BACKLOG.md item #1): this blindly deletes the department
-     * even if employees still reference it, which violates the FK constraint
-     * in production and throws an unhelpful DataIntegrityViolationException
-     * instead of a clean 409. Needs a check (or a reassignment step) before
-     * deleting.
-     */
     @Transactional
     public void delete(Long id) {
+        // no null check needed. If the department does not exist, the exception is thrown immediately
         Department department = getEntityById(id);
+
+        //check for existing employee before deleting
+        if (employeeRepository.existsByDepartmentId(department.getId())) {
+            throw new BusinessRuleException(
+                    "Cannot delete department '%s' - it still has employees assigned"
+                            .formatted(department.getName()));
+        }
+
         departmentRepository.delete(department);
     }
 }

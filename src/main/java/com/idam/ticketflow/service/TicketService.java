@@ -8,6 +8,7 @@ import com.idam.ticketflow.domain.enums.TicketStatus;
 import com.idam.ticketflow.dto.request.TicketCreateRequest;
 import com.idam.ticketflow.dto.request.TicketUpdateRequest;
 import com.idam.ticketflow.dto.response.TicketResponse;
+import com.idam.ticketflow.exception.BusinessRuleException;
 import com.idam.ticketflow.exception.ResourceNotFoundException;
 import com.idam.ticketflow.repository.TicketRepository;
 import com.idam.ticketflow.service.ai.AiAnalysisResult;
@@ -86,19 +87,23 @@ public class TicketService {
 
     @Transactional
     public TicketResponse update(Long id, TicketUpdateRequest request) {
+        boolean needsReanalysis = false;
+
         Ticket ticket = getEntityById(id);
 
-        if (request.title() != null) {
+        if (request.title() != null && !request.title().equals(ticket.getTitle())) {
             ticket.setTitle(request.title());
+            needsReanalysis = true;
         }
 
-        // KNOWN BUG (see BACKLOG.md item #3): updating the description does NOT
-        // re-run AI analysis or clear the old aiSummary/aiSuggestedPriority, so
-        // the AI fields silently go stale and no longer describe the current
-        // ticket text. Either re-analyze here, or clear the fields and mark the
-        // ticket as "needs re-analysis".
-        if (request.description() != null) {
+        if (request.description() != null && !request.description().equals(ticket.getDescription())) {
             ticket.setDescription(request.description());
+            needsReanalysis = true;
+        }
+
+        if (needsReanalysis) {
+            AiAnalysisResult analysis = ticketAiService.analyze(ticket.getTitle(), ticket.getDescription());
+            ticket.applyAiAnalysis(analysis.summary(), analysis.suggestedPriority());
         }
 
         if (request.status() != null) {
@@ -116,29 +121,34 @@ public class TicketService {
         return TicketResponse.detail(ticket);
     }
 
-    /**
-     * KNOWN BUG (see BACKLOG.md item #2): this does not check that the
-     * assignee actually belongs to the ticket's department, so an HR employee
-     * can be assigned an Engineering ticket. Add that validation (throw
-     * BusinessRuleException on mismatch) once the rule is confirmed with the
-     * team - some orgs deliberately allow cross-department assignment for
-     * generalist agents, so check before "fixing" this.
-     */
-    private void assignTicket(Ticket ticket, Long assigneeId) {
+    private void assignTicket(Ticket ticket, Long assigneeId)  {
         Employee assignee = employeeService.getEntityById(assigneeId);
+        Department assigneeDepartment = assignee.getDepartment();
+
+        if (assigneeDepartment == null) {
+            throw new BusinessRuleException(
+                    "Cannot assign ticket to '%s' - they are not part of any department"
+                            .formatted(assignee.getFullName()));
+        }
+
+        if (!assigneeDepartment.getId().equals(ticket.getDepartment().getId())) {
+            throw new BusinessRuleException(
+                    "Cannot assign ticket to '%s' - they belong to '%s' but the ticket belongs to '%s'"
+                            .formatted(assignee.getFullName(),
+                                    assigneeDepartment.getName(),
+                                    ticket.getDepartment().getName()));
+        }
+
         ticket.setAssignedTo(assignee);
     }
 
     /**
-     * KNOWN BUG (see BACKLOG.md item #4): TicketPriority.compareTo() sorts by
-     * declaration order (LOW < MEDIUM < HIGH < CRITICAL), so a plain
-     * Comparator.comparing(Ticket::getPriority) sorts *ascending* by urgency.
-     * This method is meant to return most-urgent-first but currently doesn't
-     * reverse the comparator, so CRITICAL tickets end up last, not first.
+     * Returns tickets ordered most-urgent-first (CRITICAL, HIGH, MEDIUM, LOW).
      */
     public List<Ticket> sortByUrgencyDescending(List<Ticket> tickets) {
         return tickets.stream()
-                .sorted(Comparator.comparing(Ticket::getPriority))
+                .sorted(Comparator.comparing(Ticket::getPriority).reversed()
+                .thenComparing(Ticket::getCreatedAt, Comparator.reverseOrder()))
                 .toList();
     }
 
